@@ -15,8 +15,8 @@ class LatentAttention():
         self.mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
         self.n_samples = self.mnist.train.num_examples
 
-        self.n_hidden = 500
-        self.n_z = 20
+        self.n_hidden = hparams.n_hidden
+        self.n_z = hparams.n_z
         self.batchsize = hparams.batch_size
         self.train_data_path = hparams.train_dataset
         self.val_data_path = hparams.val_dataset
@@ -77,7 +77,7 @@ class LatentAttention():
                 yield demand_f,develop_f
 
         shapes = ((None,self.feature_len),(None,self.feature_len)) #demand_feature, develop_feature
-        types = (tf.int32,tf.int32)
+        types = (tf.float32,tf.float32)
         ds = tf.data.Dataset.from_generator(gen, output_types=types, output_shapes=shapes)
         # ds = ds.padded_batch(self.batchsize if train else batch_size,
         #                      padded_shapes=tuple([pad_shapes[k] for k in input_format]),
@@ -102,15 +102,45 @@ class LatentAttention():
                                                end_learning_rate=hparams.end_lr, power=2., cycle=False)
         self.advance_global_step = tf.assign_add(global_step, 1, name='global_step_advance')
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_ph)
-        #TODO build the model following
         with tf.device("/gpu:0"):
             inputs = iterator.get_next()
-            dem_f, dev_f = inputs # b,?,channels
+            # dem_f, dev_f = inputs # b,?,channels
             with tf.variable_scope("encoder", reuse=reuse):
-                print("encoder...")
+                h2 = self.feature_extractor(inputs)
+                h2_flat = tf.reshape(h2, [self.batchsize, -1])
+                c_l = h2_flat.get_shape().as_list()[-1]
+                z_mean = dense(h2_flat, c_l, self.n_z, "w_mean")
+                z_stddev = dense(h2_flat, c_l, self.n_z, "w_stddev")
+                
 
+            with tf.variable_scope("decoder",reuse=reuse):
+                samples = tf.random_normal([self.batchsize, self.n_z], 0, 1, dtype=tf.float32)
+                guessed_z = z_mean + (z_stddev * samples)
+                self.generated_vector = self.feature_decoder(guessed_z)
+            # TODO build the model following
 
-        # encoder
+    def feature_extractor(self,inputs,p=1):
+        # TODO maybe we can stack the different phrase of software development into a 2-D map and us 2-D conv
+        with tf.variable_scope("feature_extractor"):
+            #so, normally how much modules for a software
+            pre_pros = []
+            ci = inputs.get_shape().as_list()[-1]
+            for input_part in inputs:
+                #low-dim extractor
+                for idx in range(p):
+                    unit_name = "pre_res_{}".format(idx + 1)
+                    pre_pros.append(residual_unit(input_part, ci, ci, unit_name))
+            combined_f = tf.concat(pre_pros,axis=-1) #combine module features of all phrase in software ,maybe can make it 3-D feature
+            c = combined_f.get_shape().as_list()[-1]
+            combined_f = tf.layers.conv1d(combined_f,c,1,padding="SAME",data_format="NWC",activation=tf.nn.leaky_relu)
+
+            h1 = lrelu(residual_unit(combined_f,ci=c,co=c*2,k=5,stride=3,name="encoder_h1")) # b,?,c -> b,~?/3,c*2
+            h2 = lrelu(residual_unit(h1, ci=c*2, co=c*4, k=3,stride=2, name="encoder_h2"))  # b,?/3,c*2 -> b,?/6,c*4
+            return h2
+
+    def feature_decoder(self,inputs):
+        pass
+    # encoder
     def recognition(self, input_images):
         with tf.variable_scope("recognition"):
             h1 = lrelu(conv2d(input_images, 1, 16, "d_h1")) # 28x28x1 -> 14x14x16

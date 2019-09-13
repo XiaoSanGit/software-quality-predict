@@ -19,5 +19,7 @@ hparams = tf.contrib.training.HParams(
     init_lr=1e-4,
     lambda_update_rate=0.5,
     end_lr=5e-6,
+    n_z = 20,
+    n_hidden =500,
 
 )
