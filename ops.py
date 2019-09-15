@@ -216,3 +216,17 @@ def dense(x, inputFeatures, outputFeatures, scope=None, with_w=False):
             return tf.matmul(x, matrix) + bias, matrix, bias
         else:
             return tf.matmul(x, matrix) + bias
+
+
+def collect_scalar_summaries(scalar_list):
+    summaries = []
+    for s in scalar_list:
+        if hasattr(s, 'name'):
+            summaries.append(tf.summary.scalar(s.name.split('/')[-1], s))
+    return summaries
+
+def collect_hist_summaries(hist_list):
+    summaries = []
+    for name, v in hist_list:
+        summaries.append(tf.summary.histogram(name, v))
+    return summaries

@@ -1,7 +1,7 @@
 import numpy as np
-import tensorflow as tf
+import pandas as pd
 import logging
-# import os
+import os
 
 def merge(images, size):
     h, w = images.shape[1], images.shape[2]
@@ -47,3 +47,17 @@ class Logger:
         if level==0: self.logger.debug(s)
         elif level==1: self.logger.info(s)
         else: self.logger.warning(s)
+
+def fake_datasets(path="./dataset/train",num=10):
+    features = []
+    names_pre = ['dem_','dev_','label_']
+    features = [[np.random.rand(5, 20), np.random.rand(5, 20), np.random.randint(low=1, high=50, size=1)] for i in
+                range(10)]
+    for j,item in enumerate(features):
+        [np.save(os.path.join(path, names_pre[i] + str(j)), item[i]) for i in range(3)]
+        line = []
+        line.append([names_pre[0]+str(j),names_pre[1]+str(j),names_pre[2]+str(j)])
+        line = pd.DataFrame(line)
+        line.to_csv(os.path.join(path,"index.csv"),header=None,index=False,mode="a")
+
+# fake_datasets()

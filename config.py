@@ -10,6 +10,7 @@ hparams = tf.contrib.training.HParams(
     train_dataset="./dataset/train/",
     val_dataset="./dataset/val/",
     summary_path = save_path_prefix,
+    result_path = "./results",
     logger_name = None,
 #########  about input  #############
     module_features_len = 20,
@@ -21,5 +22,6 @@ hparams = tf.contrib.training.HParams(
     end_lr=5e-6,
     n_z = 20,
     n_hidden =500,
+    n_out = 1,
 
 )
