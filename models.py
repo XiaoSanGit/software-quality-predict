@@ -11,8 +11,6 @@ from config import hparams
 
 class LatentAttention():
     def __init__(self):
-        self.mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
-        self.n_samples = self.mnist.train.num_examples
 
         self.n_hidden = hparams.n_hidden
         self.n_z = hparams.n_z
@@ -108,6 +106,15 @@ class LatentAttention():
         #                      padded_shapes=tuple([pad_shapes[k] for k in input_format]),
         #                      padding_values=tuple([pads[k] for k in input_format]),
         #                      drop_remainder=True)
+        ds = ds.padded_batch(batch_size=self.batchsize,
+                             ##### previously for mel ######
+                             # padded_shapes=(((None, self.args.num_mels), (), (None,), ()), ((None,), ())),
+                             # padding_values=((0., 0, 28, 0), (28, 0)), # because DeepSpeech.py line298 shows it is using 29chars
+                             #################################
+                             padded_shapes=((None,self.feature_len),(None,self.feature_len),(self.n_out)),
+                             # padding_values=((0., 0.), (0., 0.), 0),
+                             # because DeepSpeech.py line298 shows it is using 29chars
+                             drop_remainder=True)  # if drop_remainder is False, the shape of each batch will not be set
         ds = ds.shuffle(buffer_size=30)
         return ds.make_initializable_iterator()
 
@@ -127,54 +134,57 @@ class LatentAttention():
                                                end_learning_rate=hparams.end_lr, power=2., cycle=False)
         self.advance_global_step = tf.assign_add(global_step, 1, name='global_step_advance')
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_ph)
-        with tf.device("/gpu:0"):
-            inputs = iterator.get_next()
-            dem_f, dev_f,label_vector = inputs # b,?,channels
-            train_inputs = [dem_f,dev_f]
-            with tf.variable_scope("encoder", reuse=reuse):
-                h2 = self.feature_extractor(train_inputs)
-                h2_flat = tf.reshape(h2, [self.batchsize, -1])
-                c_l = h2_flat.get_shape().as_list()[-1]
-                z_mean = dense(h2_flat, c_l, self.n_z, "w_mean")
-                z_stddev = dense(h2_flat, c_l, self.n_z, "w_stddev")
-                self.latent_loss = latent_loss = 0.5 * tf.reduce_sum(
-                    tf.square(z_mean) + tf.square(z_stddev) - tf.log(tf.square(z_stddev)) - 1, 1)
+        # with tf.device("/gpu:0"):
+        inputs = iterator.get_next()
+        dem_f, dev_f,label_vector = inputs # b,?,channels
+        train_inputs = [dem_f,dev_f]
+        with tf.variable_scope("encoder", reuse=reuse):
+            h2 = self.feature_extractor(train_inputs)#b,?,c
+            # TODO the num of modules is not defined thus we cannot do reshape. but if we can make it fixed?
+            # h2_flat = tf.reshape(h2, [self.batchsize, -1])
+            h2_flat = tf.reduce_sum(h2,1)
+            c_l = h2_flat.get_shape().as_list()[-1]
+            h3_flat = dense(h2_flat,c_l,c_l/2,scope="w_modules_combined",activation=tf.nn.leaky_relu)
+            z_mean = dense(h3_flat, c_l/2, self.n_z, "w_mean")
+            z_stddev = dense(h3_flat, c_l/2, self.n_z, "w_stddev")
+            self.latent_loss = latent_loss = 0.5 * tf.reduce_sum(
+                tf.square(z_mean) + tf.square(z_stddev) - tf.log(tf.square(z_stddev)) - 1, 1)
 
-            with tf.variable_scope("decoder",reuse=reuse):
-                samples = tf.random_normal([self.batchsize, self.n_z], 0, 1, dtype=tf.float32)
-                guessed_z = z_mean + (z_stddev * samples)
-                z_develop = dense(guessed_z, self.n_z, c_l, scope='z_matrix') #b,c_l
-                z_matrix = tf.expand_dims(z_develop,-2)#b,1,c_l
-                h1_d = conv1(z_matrix,k=1,c_o=self.combined_c*2,s=1,name="decoder_h2",relu=True)
-                h2_d = conv1(h1_d,k=1,c_o=self.combined_c,s=1,name="decoder_h2",relu=True)
-                self.y = feature_out = dense(h2_d,self.combined_c,hparams.n_out, scope='z_out')
-                self.g_loss = mse = tf.reduce_sum(tf.square(feature_out - label_vector))
+        with tf.variable_scope("decoder",reuse=reuse):
+            samples = tf.random_normal([self.batchsize, self.n_z], 0, 1, dtype=tf.float32)
+            guessed_z = z_mean + (z_stddev * samples)
+            z_develop = dense(guessed_z, self.n_z, c_l, scope='z_matrix') #b,c_l
+            z_matrix = tf.expand_dims(z_develop,-2)#b,1,c_l
+            h1_d = conv1(z_matrix,k=1,c_o=self.combined_c*2,s=1,name="decoder_h1",relu=True)
+            h2_d = conv1(h1_d,k=1,c_o=self.combined_c,s=1,name="decoder_h2",relu=True)
+            self.y = feature_out = dense(h2_d,self.combined_c,hparams.n_out, scope='z_out')
+            self.g_loss = mse = tf.reduce_sum(tf.square(feature_out - label_vector))
 
-                self.cost = tf.reduce_mean(self.g_loss + self.latent_loss)
-                self.upgrade = self.optimizer.minimize(self.cost)
+            self.cost = tf.reduce_mean(self.g_loss + self.latent_loss)
+            self.upgrade = self.optimizer.minimize(self.cost)
 
-                # h1 = tf.nn.relu(conv_transpose(z_matrix, [self.batchsize, 14, 14, 16], "g_h1"))
-                # h2 = conv_transpose(h1, [self.batchsize, 28, 28, 1], "g_h2")
-                # h2 = tf.nn.sigmoid(h2)
-                self.var_list = [v for v in tf.trainable_variables()]
+            # h1 = tf.nn.relu(conv_transpose(z_matrix, [self.batchsize, 14, 14, 16], "g_h1"))
+            # h2 = conv_transpose(h1, [self.batchsize, 28, 28, 1], "g_h2")
+            # h2 = tf.nn.sigmoid(h2)
+            self.var_list = [v for v in tf.trainable_variables()]
 
-                # summaries
-            with tf.variable_scope('summaries'):
-                self.loss_summaries = collect_scalar_summaries(
-                    # (ae_loss, cycle_loss, disc_loss_adv, disc_loss_rec, loss)
-                    (mse, latent_loss)
-                )
-                hist_list = list()
-                # decoder_cell_vars = tf.get_collection('encoder_vars')
-                # hist_list.extend([x for x in decoder_cell_vars])
-                # # self.print(tf.get_collection('grads'))
-                # hist_list.extend([x for x in tf.get_collection('grads')])
-                for hists in ['encoder', 'decoder', 'grads']:
-                    hist_list.extend(tf.get_collection(hists))
-                self.hist_summaries = collect_hist_summaries(hist_list)
+            # summaries
+        with tf.variable_scope('summaries'):
+            self.loss_summaries = collect_scalar_summaries(
+                # (ae_loss, cycle_loss, disc_loss_adv, disc_loss_rec, loss)
+                (mse, latent_loss)
+            )
+            hist_list = list()
+            # decoder_cell_vars = tf.get_collection('encoder_vars')
+            # hist_list.extend([x for x in decoder_cell_vars])
+            # # self.print(tf.get_collection('grads'))
+            # hist_list.extend([x for x in tf.get_collection('grads')])
+            for hists in ['encoder', 'decoder', 'grads']:
+                hist_list.extend(tf.get_collection(hists))
+            self.hist_summaries = collect_hist_summaries(hist_list)
 
-            self.params_usage()
-            return feature_out,[mse,latent_loss]
+        self.params_usage()
+        return feature_out,[mse,latent_loss]
 
     def feature_extractor(self,inputs,p=1):
         # TODO maybe we can stack the different phrase of software development into a 2-D map and us 2-D conv
@@ -182,14 +192,14 @@ class LatentAttention():
             #so, normally how much modules for a software
             pre_pros = []
             ci = inputs[0].get_shape().as_list()[-1]
-            for input_part in inputs:
+            for id_in,input_part in enumerate(inputs):
                 #low-dim extractor
                 for idx in range(p):
-                    unit_name = "pre_res_{}".format(idx + 1)
+                    unit_name = "pre_res_{}_{}".format(id_in,idx + 1)
                     pre_pros.append(residual_unit(input_part, ci, ci, unit_name))
             combined_f = tf.concat(pre_pros,axis=-1) #combine module features of all phrase in software ,maybe can make it 3-D feature
             self.combined_c = c = combined_f.get_shape().as_list()[-1]
-            combined_f = tf.layers.conv1d(combined_f,c,1,padding="SAME",data_format="NWC",activation=tf.nn.leaky_relu)
+            combined_f = tf.layers.conv1d(combined_f,c,1,padding="SAME",data_format="channels_last",activation=tf.nn.leaky_relu)
 
             h1 = lrelu(residual_unit(combined_f,ci=c,co=c*2,k=5,stride=3,name="encoder_h1")) # b,?,c -> b,~?/3,c*2
             h2 = lrelu(residual_unit(h1, ci=c*2, co=c*4, k=3,stride=2, name="encoder_h2"))  # b,?/3,c*2 -> b,?/6,c*4

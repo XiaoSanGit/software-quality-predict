@@ -90,7 +90,7 @@ def conv1(x,
     """
     with tf.name_scope(name), tf.variable_scope(name):
         # Get the input channel
-        c_i = x.get_shape()[-1]/group
+        c_i = x.get_shape()[-1]
         # Create the weights, with shape [k_h, k_w, c_i, c_o]
         weights = make_cpu_variables("weights", [k, c_i, c_o], trainable=trainable)
         # Create a function for convolution calculation
@@ -128,10 +128,10 @@ def residual_unit(x, ci, co, name,k=3, stride=1,is_train=True):
     --- co: Output channels
     --- name: Unit name
     --- stride: Convolution stride
-    Output:
+    Output:tf.name_scope(name),
     --- outputs: Unit output
     """
-    with tf.name_scope(name), tf.variable_scope(name):
+    with tf.variable_scope(name):
         # Batch Normalization
         bn_1 = batch_normal(x, is_train, "bn_1", tf.nn.relu)
         # 1x1 Convolution degrade dims.
@@ -149,7 +149,7 @@ def residual_unit(x, ci, co, name,k=3, stride=1,is_train=True):
             skip = conv1(bn_1, 1,  co,  stride, "conv_skip", relu=False)
         else:
             skip = x
-        outputs = tf.add(conv_3, skip, name="fuse")
+        outputs = tf.add(conv_3, skip, name=name+"fuse")
         return outputs
 
 
@@ -208,14 +208,17 @@ def lrelu(x, leak=0.2, name="lrelu"):
         return f1 * x + f2 * abs(x)
 
 # fully-conected layer
-def dense(x, inputFeatures, outputFeatures, scope=None, with_w=False):
-    with tf.variable_scope(scope or "Linear"):
-        matrix = tf.get_variable("Matrix", [inputFeatures, outputFeatures], tf.float32, tf.random_normal_initializer(stddev=0.02))
-        bias = tf.get_variable("bias", [outputFeatures], initializer=tf.constant_initializer(0.0))
-        if with_w:
-            return tf.matmul(x, matrix) + bias, matrix, bias
-        else:
-            return tf.matmul(x, matrix) + bias
+def dense(x, inputFeatures, outputFeatures, scope=None, with_w=False,activation=None):
+    return tf.layers.dense(x, outputFeatures, activation, use_bias=True, name=scope,
+                           kernel_initializer=tf.random_normal_initializer(stddev=0.02),bias_initializer=tf.constant_initializer(0.0))
+
+
+        # matrix = tf.get_variable("Matrix", [inputFeatures, outputFeatures], tf.float32, tf.random_normal_initializer(stddev=0.02))
+        # bias = tf.get_variable("bias", [outputFeatures], initializer=tf.constant_initializer(0.0))
+        # if with_w:
+        #     return tf.matmul(x, matrix) + bias, matrix, bias
+        # else:
+        #     return tf.matmul(x, matrix) + bias
 
 
 def collect_scalar_summaries(scalar_list):

@@ -36,7 +36,8 @@ class Logger:
         if type=='file' and file_path is None:
             file_path = 'logger.txt'
             self.prompt(f'logger: no file path given, set to default {file_path}.')
-
+        if ~os.path.exists(file_path):
+            os.mkdir("/".join(file_path.split("/")[:-1]))
         handler = logging.FileHandler(file_path) if type=='file' else logging.StreamHandler()
         self.logger.addHandler(
             self.getHandler(handler,
