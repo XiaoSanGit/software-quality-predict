@@ -147,8 +147,8 @@ class LatentAttention():
             h3_flat = dense(h2_flat,c_l,c_l/2,scope="w_modules_combined",activation=tf.nn.leaky_relu)
             z_mean = dense(h3_flat, c_l/2, self.n_z, "w_mean")
             z_stddev = dense(h3_flat, c_l/2, self.n_z, "w_stddev")
-            self.latent_loss = latent_loss = 0.5 * tf.reduce_sum(
-                tf.square(z_mean) + tf.square(z_stddev) - tf.log(tf.square(z_stddev)) - 1, 1)
+            self.latent_loss = latent_loss = tf.reduce_mean(0.5 * tf.reduce_sum(
+                tf.square(z_mean) + tf.square(z_stddev) - tf.log(tf.square(z_stddev)) - 1, 1),name="latent_loss")
 
         with tf.variable_scope("decoder",reuse=reuse):
             samples = tf.random_normal([self.batchsize, self.n_z], 0, 1, dtype=tf.float32)
@@ -158,7 +158,7 @@ class LatentAttention():
             h1_d = conv1(z_matrix,k=1,c_o=self.combined_c*2,s=1,name="decoder_h1",relu=True)
             h2_d = conv1(h1_d,k=1,c_o=self.combined_c,s=1,name="decoder_h2",relu=True)
             self.y = feature_out = dense(h2_d,self.combined_c,hparams.n_out, scope='z_out')
-            self.g_loss = mse = tf.reduce_sum(tf.square(feature_out - label_vector))
+            self.g_loss = mse = tf.reduce_sum(tf.square(feature_out - label_vector),name="g_loss")
 
             self.cost = tf.reduce_mean(self.g_loss + self.latent_loss)
             self.upgrade = self.optimizer.minimize(self.cost)
@@ -273,7 +273,7 @@ class LatentAttention():
                         )
                         dur = time.time() - start
                         epoch_time.append(dur)
-                        _, g_loss, latent_loss, summ, predicted = ret
+                        _, g_loss, latent_loss,__, summ, predicted = ret
                         # [self.print(idx,x) for idx,x in enumerate(to_run_ops)]
                         self.print('== epoch {} == iter {} : {} seconds, g_loss/latent_loss:{}/{}'
                                    .format(epoch, global_iter_cnt, dur, g_loss, latent_loss))

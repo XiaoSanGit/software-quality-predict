@@ -57,7 +57,7 @@ def fake_datasets(path="./dataset/train",num=10):
     for j,item in enumerate(features):
         [np.save(os.path.join(path, names_pre[i] + str(j)), item[i]) for i in range(3)]
         line = []
-        line.append([names_pre[0]+str(j),names_pre[1]+str(j),names_pre[2]+str(j)])
+        line.append([names_pre[0]+str(j)+".npy",names_pre[1]+str(j)+".npy",names_pre[2]+str(j)+".npy"])
         line = pd.DataFrame(line)
         line.to_csv(os.path.join(path,"index.csv"),header=None,index=False,mode="a")
 
